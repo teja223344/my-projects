@@ -1,0 +1,75 @@
+pipeline {
+    agent any 
+     tools{
+         jdk 'jdk17'
+         nodejs 'node16'
+     }
+     environment {
+        SCANNER_HOME=tool 'sonar-scanner'
+        docker_image_name = "raja"
+        docker_image_tag = "v1.0.0"
+        container_name="raja" 
+    } 
+    stages{
+        stage('clean workspace'){
+            steps{
+                cleanWs()
+            }
+        }
+        stage('checkout'){
+            steps{
+                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/Ravitejasetti/Netflix-clone.git']])
+            }
+        }
+        stage('sonarqube analysis'){
+            steps{
+                withSonarQubeEnv('sonar-scanner') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=netflix \
+                    -Dsonar.projectKey=netflix '''
+                    
+                }
+            }
+        }
+        stage('Install Dependencies') {
+            steps {
+                sh "npm install"
+            }
+        }
+        stage('depency check'){
+            steps{
+                dependencyCheck additionalArguments: '', odcInstallation: 'Dp-check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        stage('docker build and push') {
+            steps {
+                script{
+                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'Docker') {
+                        sh"docker stop raja"
+                        sh"docker rm raja"
+                         sh "docker build -t raja223344/raja5:v1.0.0 ."
+                         sh "docker run --name ${container_name} -d -p 8088:8080 raja223344/raja5:v1.0.0"
+                         sh "docker push raja223344/raja5:v1.0.0"
+                    } 
+                } 
+            } 
+        }
+        stage("TRIVY"){
+            steps{
+                sh "trivy image raja223344/raja5:v1.0.0 > trivyimage.txt" 
+            }
+        }
+        stage('Deploy to container'){
+            steps{
+                sh 'docker run -d --name ravinetflix -p 8086:80 raja223344/raja5:v1.0.0'
+            }
+        }
+    }
+    post {
+     always {
+         emailext body: '''"Project: ${env.JOB_NAME}<br/>" +
+                "Build Number: ${env.BUILD_NUMBER}<br/>" +
+                "URL: ${env.Bhttp://65.0.86.230:8080/job/netflix/26/console}<br/>"''', subject: 'this is the project build trigger result', to: 'raviteja.setti@gmail.com'
+        }
+    }
+}
